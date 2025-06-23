@@ -1,5 +1,3 @@
-// ... Весь JS-код из <script>...</script> chat.html ... 
-
 const API = 'https://third-bfwa.onrender.com';
 let token = '';
 let currentUserId = null;
@@ -60,7 +58,7 @@ function switchTab(tab) {
     t.setAttribute('aria-selected', 'false');
   });
   document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
-  
+
   if (tab === 'login') {
     document.querySelector('.auth-tab:nth-child(1)').classList.add('active');
     document.querySelector('.auth-tab:nth-child(1)').setAttribute('aria-selected', 'true');
@@ -223,6 +221,11 @@ async function loadUsers() {
       console.log('[loadUsers] Получено пользователей:', allUsers);
       renderUsers(allUsers);
     } else {
+      if (res.status === 401) {
+        showMessage('Сессия истекла, войдите снова');
+        logout();
+        return;
+      }
       const err = await res.text();
       console.error('[loadUsers] Ошибка ответа:', res.status, err);
       throw new Error('Failed to load users');
@@ -293,7 +296,7 @@ async function loadChat(userId, username, scrollToBottom = false) {
       document.getElementById('sidebar').classList.remove('active');
     }
 
-    // Функция для загрузки сообщений (используется и для автообновления)
+    // Функция для загрузки сообщений
     async function fetchMessages(isFirst = false) {
       try {
         const res = await fetch(`${API}/messages/${userId}`, {
@@ -301,16 +304,24 @@ async function loadChat(userId, username, scrollToBottom = false) {
         });
         if (res.ok) {
           const messages = await res.json();
-          // Сравниваем с предыдущими сообщениями
-          if (isFirst || JSON.stringify(messages) !== JSON.stringify(lastMessages)) {
+          // Проверяем, изменилось ли количество сообщений или последнее сообщение
+          const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
+          const prevLastMessageId = lastMessages.length > 0 ? lastMessages[lastMessages.length - 1].id : null;
+          if (isFirst || lastMessageId !== prevLastMessageId) {
             lastMessages = messages;
             const chatMessages = document.getElementById('chatMessages');
+            const isAtBottom = chatMessages.scrollTop + chatMessages.clientHeight >= chatMessages.scrollHeight - 10;
             chatMessages.innerHTML = '';
             messages.forEach(msg => appendMessage(msg));
-            if (scrollToBottom || isFirst) {
+            // Прокручиваем вниз только если пользователь был внизу или это первая загрузка
+            if (isFirst || isAtBottom || scrollToBottom) {
               chatMessages.scrollTop = chatMessages.scrollHeight;
             }
           }
+        } else if (res.status === 401) {
+          showMessage('Сессия истекла, войдите снова');
+          logout();
+          return;
         } else {
           throw new Error('Failed to load messages');
         }
@@ -324,16 +335,17 @@ async function loadChat(userId, username, scrollToBottom = false) {
     // Первый раз загружаем с прокруткой вниз
     await fetchMessages(true);
 
-    // Запускаем автообновление каждую секунду (без мерцания)
-    chatUpdateInterval = setInterval(() => fetchMessages(false), 1000);
+    // Запускаем автообновление каждые 3 секунды (меньше нагрузка)
+    chatUpdateInterval = setInterval(() => fetchMessages(false), 3000);
 
   } catch (error) {
+    console.error('[loadChat] Ошибка:', error);
     showMessage('Ошибка загрузки чата');
   }
 }
 
 function appendMessage(msg) {
-  const isOutgoing = Number(msg.sender_id) === Number(currentUserId);
+  const isOutgoing = msg.sender_id == currentUserId; // Упрощённое сравнение (API должен возвращать согласованные типы)
   const messageDiv = document.createElement('div');
   messageDiv.className = `message ${isOutgoing ? 'message-out' : 'message-in'}`;
   
@@ -374,7 +386,10 @@ async function sendMessage() {
     if (res.ok) {
       input.value = '';
       input.style.height = 'auto';
-      await loadChat(selectedUserId, selectedUsername);
+      await loadChat(selectedUserId, selectedUsername, true); // Прокрутка вниз после отправки
+    } else if (res.status === 401) {
+      showMessage('Сессия истекла, войдите снова');
+      logout();
     } else {
       throw new Error('Failed to send message');
     }
@@ -416,4 +431,4 @@ function hideLoading(selector = 'body') {
   if (!container) return;
   const loading = container.querySelector('.loading');
   if (loading) loading.remove();
-} 
+}
