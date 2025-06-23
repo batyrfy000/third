@@ -4,8 +4,9 @@ let currentUserId = null;
 let currentUsername = '';
 let selectedUserId = null;
 let selectedUsername = '';
-let allUsers = [];
+let allUsers = []; // Для локального поиска
 let chatUpdateInterval = null;
+let lastMessages = [];
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -18,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
       currentUsername = payload.username || localStorage.getItem('username');
       initChat();
     } catch (error) {
-      console.error('[DOMContentLoaded] Invalid token:', error);
+      console.error('Invalid token:', error);
       logout();
     }
   }
@@ -27,14 +28,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const searchInput = document.getElementById('searchInput');
   searchInput.addEventListener('input', debounce(searchUsers, 300));
 
-  // Fallback: show authSection if both sections are hidden
+  // Аварийная проверка: если оба блока скрыты, показываем authSection
   setTimeout(() => {
     const auth = document.getElementById('authSection');
     const chat = document.getElementById('chatSection');
     if (getComputedStyle(auth).display === 'none' && getComputedStyle(chat).display === 'none') {
       auth.classList.remove('hidden');
       auth.style.display = 'block';
-      console.log('[Fallback] Showing authSection');
     }
   }, 1000);
 });
@@ -58,7 +58,7 @@ function switchTab(tab) {
     t.setAttribute('aria-selected', 'false');
   });
   document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
-
+  
   if (tab === 'login') {
     document.querySelector('.auth-tab:nth-child(1)').classList.add('active');
     document.querySelector('.auth-tab:nth-child(1)').setAttribute('aria-selected', 'true');
@@ -88,7 +88,7 @@ function logout() {
     clearInterval(chatUpdateInterval);
     chatUpdateInterval = null;
   }
-  console.log('[logout] User logged out');
+  lastMessages = [];
 }
 
 function debounce(func, wait) {
@@ -115,7 +115,6 @@ async function register() {
 
   try {
     showLoading();
-    console.log('[register] Sending request:', { username });
     const res = await fetch(`${API}/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -130,10 +129,9 @@ async function register() {
     } else {
       const error = await res.json();
       showMessage(error.detail || 'Ошибка регистрации');
-      console.error('[register] Error:', res.status, error);
     }
   } catch (error) {
-    console.error('[register] Network error:', error);
+    console.error('Registration error:', error);
     showMessage('Ошибка сети: ' + error.message);
   } finally {
     hideLoading();
@@ -151,7 +149,7 @@ async function login() {
 
   try {
     showLoading();
-    console.log('[login] Sending request:', username);
+    console.log('[login] Отправка запроса на /login', username);
     const form = new URLSearchParams();
     form.append('username', username);
     form.append('password', password);
@@ -163,7 +161,7 @@ async function login() {
     });
 
     const data = await res.json();
-    console.log('[login] Response:', data);
+    console.log('[login] Ответ от /login:', data);
     if (res.ok && data.access_token) {
       token = data.access_token;
       localStorage.setItem('token', token);
@@ -171,14 +169,13 @@ async function login() {
       const payload = parseJwt(token);
       currentUserId = payload.sub;
       currentUsername = username;
-      console.log('[login] Success, currentUserId:', currentUserId, 'currentUsername:', currentUsername);
+      console.log('[login] Успешный вход, currentUserId:', currentUserId, 'currentUsername:', currentUsername);
       initChat();
     } else {
       showMessage(data.detail || 'Ошибка входа');
-      console.error('[login] Error:', res.status, data);
     }
   } catch (error) {
-    console.error('[login] Network error:', error);
+    console.error('[login] Login error:', error);
     showMessage('Ошибка сети: ' + error.message);
   } finally {
     hideLoading();
@@ -187,7 +184,7 @@ async function login() {
 
 function initChat() {
   try {
-    console.log('[initChat] Starting');
+    console.log('[initChat] Запуск');
     document.getElementById('authSection').classList.add('hidden');
     document.getElementById('chatSection').classList.remove('hidden');
     document.getElementById('chatSection').style.display = 'block';
@@ -206,7 +203,7 @@ function initChat() {
       textarea.style.height = `${textarea.scrollHeight}px`;
     });
   } catch (error) {
-    console.error('[initChat] Error:', error);
+    console.error('[initChat] Ошибка:', error);
     showMessage('Ошибка инициализации чата');
     logout();
   }
@@ -215,28 +212,21 @@ function initChat() {
 async function loadUsers() {
   try {
     showLoading('#userList');
-    console.log('[loadUsers] Fetching users');
+    console.log('[loadUsers] Запрос к /users');
     const res = await fetch(`${API}/users`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Cache-Control': 'no-cache'
-      }
+      headers: { Authorization: `Bearer ${token}` }
     });
     if (res.ok) {
       allUsers = await res.json();
-      console.log('[loadUsers] Received users:', allUsers);
+      console.log('[loadUsers] Получено пользователей:', allUsers);
       renderUsers(allUsers);
-    } else if (res.status === 401) {
-      console.error('[loadUsers] 401 Unauthorized');
-      showMessage('Сессия истекла, войдите снова');
-      logout();
     } else {
       const err = await res.text();
-      console.error('[loadUsers] Error:', res.status, err);
+      console.error('[loadUsers] Ошибка ответа:', res.status, err);
       throw new Error('Failed to load users');
     }
   } catch (error) {
-    console.error('[loadUsers] Network error:', error);
+    console.error('[loadUsers] Error loading users:', error);
     showMessage('Ошибка загрузки пользователей');
   } finally {
     hideLoading('#userList');
@@ -244,7 +234,7 @@ async function loadUsers() {
 }
 
 function renderUsers(users) {
-  console.log('[renderUsers] Rendering users:', users, 'currentUserId:', currentUserId);
+  console.log('[renderUsers] users:', users, 'currentUserId:', currentUserId);
   const userList = document.getElementById('userList');
   userList.innerHTML = '';
   users
@@ -270,13 +260,14 @@ function renderUsers(users) {
       userItem.appendChild(details);
       userList.appendChild(userItem);
     });
-  console.log('[renderUsers] userList content:', userList.innerHTML);
+  console.log('[renderUsers] userList.innerHTML:', userList.innerHTML);
 }
 
 async function loadChat(userId, username, scrollToBottom = false) {
   selectedUserId = userId;
   selectedUsername = username;
 
+  // Очищаем предыдущий интервал, если был
   if (chatUpdateInterval) {
     clearInterval(chatUpdateInterval);
     chatUpdateInterval = null;
@@ -300,73 +291,60 @@ async function loadChat(userId, username, scrollToBottom = false) {
       document.getElementById('sidebar').classList.remove('active');
     }
 
+    // Функция для загрузки сообщений (используется и для автообновления)
     async function fetchMessages(isFirst = false) {
       try {
-        console.log(`[fetchMessages] Fetching messages for userId=${userId}`);
-        const res = await fetch(`${API}/messages/${userId}?t=${Date.now()}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Cache-Control': 'no-cache'
-          }
+        const res = await fetch(`${API}/messages/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok) {
           const messages = await res.json();
-          console.log('[fetchMessages] Received messages:', messages);
-          const chatMessages = document.getElementById('chatMessages');
-          const isAtBottom = chatMessages.scrollTop + chatMessages.clientHeight >= chatMessages.scrollHeight - 10;
-
-          // Рендерим все сообщения при каждом запросе
-          chatMessages.innerHTML = '';
-          messages.forEach(msg => appendMessage(msg));
-          console.log('[fetchMessages] Rendered messages:', messages.length);
-
-          if (isFirst || isAtBottom || scrollToBottom) {
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-            console.log('[fetchMessages] Scrolled to bottom');
+          // Сравниваем с предыдущими сообщениями
+          if (isFirst || JSON.stringify(messages) !== JSON.stringify(lastMessages)) {
+            lastMessages = messages;
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.innerHTML = '';
+            messages.forEach(msg => appendMessage(msg));
+            if (scrollToBottom || isFirst) {
+              chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
           }
-        } else if (res.status === 401) {
-          console.error('[fetchMessages] 401 Unauthorized');
-          showMessage('Сессия истекла, войдите снова');
-          logout();
         } else {
-          const error = await res.json();
-          console.error('[fetchMessages] Error:', res.status, error);
           throw new Error('Failed to load messages');
         }
       } catch (error) {
-        console.error('[fetchMessages] Network error:', error);
         if (isFirst) {
           showMessage('Ошибка загрузки чата');
         }
       }
     }
 
+    // Первый раз загружаем с прокруткой вниз
     await fetchMessages(true);
+
+    // Запускаем автообновление каждую секунду (без мерцания)
     chatUpdateInterval = setInterval(() => fetchMessages(false), 1000);
 
   } catch (error) {
-    console.error('[loadChat] Error:', error);
     showMessage('Ошибка загрузки чата');
   }
 }
 
 function appendMessage(msg) {
-  console.log('[appendMessage] Adding message:', msg);
   const isOutgoing = Number(msg.sender_id) === Number(currentUserId);
   const messageDiv = document.createElement('div');
   messageDiv.className = `message ${isOutgoing ? 'message-out' : 'message-in'}`;
-
+  
   const contentDiv = document.createElement('div');
   contentDiv.textContent = msg.content;
-
+  
   const timeDiv = document.createElement('div');
   timeDiv.className = 'message-time';
   timeDiv.textContent = formatTime(msg.timestamp);
-
+  
   messageDiv.appendChild(contentDiv);
   messageDiv.appendChild(timeDiv);
-  const chatMessages = document.getElementById('chatMessages');
-  chatMessages.appendChild(messageDiv);
+  document.getElementById('chatMessages').appendChild(messageDiv);
 }
 
 function formatTime(timestamp) {
@@ -377,15 +355,11 @@ function formatTime(timestamp) {
 async function sendMessage() {
   const input = document.getElementById('msgInput');
   const content = input.value.trim();
-
-  if (!content || !selectedUserId) {
-    console.log('[sendMessage] Empty message or no receiver selected');
-    return;
-  }
-
+  
+  if (!content || !selectedUserId) return;
+  
   try {
     showLoading('#chatMessages');
-    console.log('[sendMessage] Sending message:', { receiver_id: selectedUserId, content });
     const res = await fetch(`${API}/messages`, {
       method: 'POST',
       headers: {
@@ -396,21 +370,14 @@ async function sendMessage() {
     });
 
     if (res.ok) {
-      console.log('[sendMessage] Message sent successfully');
       input.value = '';
       input.style.height = 'auto';
-      await loadChat(selectedUserId, selectedUsername, true);
-    } else if (res.status === 401) {
-      console.error('[sendMessage] 401 Unauthorized');
-      showMessage('Сессия истекла, войдите снова');
-      logout();
+      await loadChat(selectedUserId, selectedUsername);
     } else {
-      const error = await res.json();
-      console.error('[sendMessage] Error:', res.status, error);
       throw new Error('Failed to send message');
     }
   } catch (error) {
-    console.error('[sendMessage] Network error:', error);
+    console.error('Error sending message:', error);
     showMessage('Ошибка отправки сообщения');
   } finally {
     hideLoading('#chatMessages');
@@ -418,7 +385,6 @@ async function sendMessage() {
 }
 
 function showMessage(message, type = 'error') {
-  console.log(`[showMessage] ${type}: ${message}`);
   const div = document.createElement('div');
   div.className = `message message-${type}`;
   div.style.position = 'fixed';
@@ -448,4 +414,4 @@ function hideLoading(selector = 'body') {
   if (!container) return;
   const loading = container.querySelector('.loading');
   if (loading) loading.remove();
-}
+} 
