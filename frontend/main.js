@@ -1,6 +1,6 @@
 // ... Весь JS-код из <script>...</script> chat.html ... 
 
-const API = 'http://localhost:8000';
+const API = 'https://third-bfwa.onrender.com';
 let token = '';
 let currentUserId = null;
 let currentUsername = '';
