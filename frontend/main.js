@@ -4,9 +4,8 @@ let currentUserId = null;
 let currentUsername = '';
 let selectedUserId = null;
 let selectedUsername = '';
-let allUsers = []; // Для локального поиска
+let allUsers = [];
 let chatUpdateInterval = null;
-let lastMessages = [];
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,7 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
       currentUsername = payload.username || localStorage.getItem('username');
       initChat();
     } catch (error) {
-      console.error('Invalid token:', error);
+      console.error('[DOMContentLoaded] Invalid token:', error);
       logout();
     }
   }
@@ -28,13 +27,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const searchInput = document.getElementById('searchInput');
   searchInput.addEventListener('input', debounce(searchUsers, 300));
 
-  // Аварийная проверка: если оба блока скрыты, показываем authSection
+  // Fallback: show authSection if both sections are hidden
   setTimeout(() => {
     const auth = document.getElementById('authSection');
     const chat = document.getElementById('chatSection');
     if (getComputedStyle(auth).display === 'none' && getComputedStyle(chat).display === 'none') {
       auth.classList.remove('hidden');
       auth.style.display = 'block';
+      console.log('[Fallback] Showing authSection');
     }
   }, 1000);
 });
@@ -58,7 +58,7 @@ function switchTab(tab) {
     t.setAttribute('aria-selected', 'false');
   });
   document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
-  
+
   if (tab === 'login') {
     document.querySelector('.auth-tab:nth-child(1)').classList.add('active');
     document.querySelector('.auth-tab:nth-child(1)').setAttribute('aria-selected', 'true');
@@ -88,7 +88,7 @@ function logout() {
     clearInterval(chatUpdateInterval);
     chatUpdateInterval = null;
   }
-  lastMessages = [];
+  console.log('[logout] User logged out');
 }
 
 function debounce(func, wait) {
@@ -115,6 +115,7 @@ async function register() {
 
   try {
     showLoading();
+    console.log('[register] Sending request:', { username });
     const res = await fetch(`${API}/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -129,9 +130,10 @@ async function register() {
     } else {
       const error = await res.json();
       showMessage(error.detail || 'Ошибка регистрации');
+      console.error('[register] Error:', res.status, error);
     }
   } catch (error) {
-    console.error('Registration error:', error);
+    console.error('[register] Network error:', error);
     showMessage('Ошибка сети: ' + error.message);
   } finally {
     hideLoading();
@@ -149,7 +151,7 @@ async function login() {
 
   try {
     showLoading();
-    console.log('[login] Отправка запроса на /login', username);
+    console.log('[login] Sending request:', username);
     const form = new URLSearchParams();
     form.append('username', username);
     form.append('password', password);
@@ -161,7 +163,7 @@ async function login() {
     });
 
     const data = await res.json();
-    console.log('[login] Ответ от /login:', data);
+    console.log('[login] Response:', data);
     if (res.ok && data.access_token) {
       token = data.access_token;
       localStorage.setItem('token', token);
@@ -169,13 +171,14 @@ async function login() {
       const payload = parseJwt(token);
       currentUserId = payload.sub;
       currentUsername = username;
-      console.log('[login] Успешный вход, currentUserId:', currentUserId, 'currentUsername:', currentUsername);
+      console.log('[login] Success, currentUserId:', currentUserId, 'currentUsername:', currentUsername);
       initChat();
     } else {
       showMessage(data.detail || 'Ошибка входа');
+      console.error('[login] Error:', res.status, data);
     }
   } catch (error) {
-    console.error('[login] Login error:', error);
+    console.error('[login] Network error:', error);
     showMessage('Ошибка сети: ' + error.message);
   } finally {
     hideLoading();
@@ -184,7 +187,7 @@ async function login() {
 
 function initChat() {
   try {
-    console.log('[initChat] Запуск');
+    console.log('[initChat] Starting');
     document.getElementById('authSection').classList.add('hidden');
     document.getElementById('chatSection').classList.remove('hidden');
     document.getElementById('chatSection').style.display = 'block';
@@ -203,7 +206,7 @@ function initChat() {
       textarea.style.height = `${textarea.scrollHeight}px`;
     });
   } catch (error) {
-    console.error('[initChat] Ошибка:', error);
+    console.error('[initChat] Error:', error);
     showMessage('Ошибка инициализации чата');
     logout();
   }
@@ -212,26 +215,28 @@ function initChat() {
 async function loadUsers() {
   try {
     showLoading('#userList');
-    console.log('[loadUsers] Запрос к /users');
+    console.log('[loadUsers] Fetching users');
     const res = await fetch(`${API}/users`, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Cache-Control': 'no-cache'
+      }
     });
     if (res.ok) {
       allUsers = await res.json();
-      console.log('[loadUsers] Получено пользователей:', allUsers);
+      console.log('[loadUsers] Received users:', allUsers);
       renderUsers(allUsers);
+    } else if (res.status === 401) {
+      console.error('[loadUsers] 401 Unauthorized');
+      showMessage('Сессия истекла, войдите снова');
+      logout();
     } else {
-      if (res.status === 401) {
-        showMessage('Сессия истекла, войдите снова');
-        logout();
-        return;
-      }
       const err = await res.text();
-      console.error('[loadUsers] Ошибка ответа:', res.status, err);
+      console.error('[loadUsers] Error:', res.status, err);
       throw new Error('Failed to load users');
     }
   } catch (error) {
-    console.error('[loadUsers] Error loading users:', error);
+    console.error('[loadUsers] Network error:', error);
     showMessage('Ошибка загрузки пользователей');
   } finally {
     hideLoading('#userList');
@@ -239,7 +244,7 @@ async function loadUsers() {
 }
 
 function renderUsers(users) {
-  console.log('[renderUsers] users:', users, 'currentUserId:', currentUserId);
+  console.log('[renderUsers] Rendering users:', users, 'currentUserId:', currentUserId);
   const userList = document.getElementById('userList');
   userList.innerHTML = '';
   users
@@ -265,14 +270,13 @@ function renderUsers(users) {
       userItem.appendChild(details);
       userList.appendChild(userItem);
     });
-  console.log('[renderUsers] userList.innerHTML:', userList.innerHTML);
+  console.log('[renderUsers] userList content:', userList.innerHTML);
 }
 
 async function loadChat(userId, username, scrollToBottom = false) {
   selectedUserId = userId;
   selectedUsername = username;
 
-  // Очищаем предыдущий интервал, если был
   if (chatUpdateInterval) {
     clearInterval(chatUpdateInterval);
     chatUpdateInterval = null;
@@ -296,78 +300,73 @@ async function loadChat(userId, username, scrollToBottom = false) {
       document.getElementById('sidebar').classList.remove('active');
     }
 
-    // Функция для загрузки сообщений
     async function fetchMessages(isFirst = false) {
       try {
-        console.log(`[fetchMessages] Запрос сообщений для userId=${userId}`);
-        const res = await fetch(`${API}/messages/${userId}`, {
-          headers: { Authorization: `Bearer ${token}` }
+        console.log(`[fetchMessages] Fetching messages for userId=${userId}`);
+        const res = await fetch(`${API}/messages/${userId}?t=${Date.now()}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Cache-Control': 'no-cache'
+          }
         });
         if (res.ok) {
           const messages = await res.json();
-          console.log('[fetchMessages] Получено сообщений:', messages.length, messages);
+          console.log('[fetchMessages] Received messages:', messages);
           const chatMessages = document.getElementById('chatMessages');
           const isAtBottom = chatMessages.scrollTop + chatMessages.clientHeight >= chatMessages.scrollHeight - 10;
 
-          // Обновляем только если сообщения изменились или это первая загрузка
-          if (isFirst || messages.length !== lastMessages.length || JSON.stringify(messages) !== JSON.stringify(lastMessages)) {
-            lastMessages = messages;
-            chatMessages.innerHTML = '';
-            messages.forEach(msg => appendMessage(msg));
-            console.log('[fetchMessages] Отрисовано сообщений:', messages.length);
-            // Прокручиваем вниз, если пользователь внизу или это первая загрузка
-            if (isFirst || isAtBottom || scrollToBottom) {
-              chatMessages.scrollTop = chatMessages.scrollHeight;
-              console.log('[fetchMessages] Прокрутка вниз выполнена');
-            }
-          } else {
-            console.log('[fetchMessages] Сообщения не изменились, пропуск рендеринга');
+          // Рендерим все сообщения при каждом запросе
+          chatMessages.innerHTML = '';
+          messages.forEach(msg => appendMessage(msg));
+          console.log('[fetchMessages] Rendered messages:', messages.length);
+
+          if (isFirst || isAtBottom || scrollToBottom) {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            console.log('[fetchMessages] Scrolled to bottom');
           }
         } else if (res.status === 401) {
           console.error('[fetchMessages] 401 Unauthorized');
           showMessage('Сессия истекла, войдите снова');
           logout();
-          return;
         } else {
-          console.error('[fetchMessages] Ошибка ответа:', res.status);
+          const error = await res.json();
+          console.error('[fetchMessages] Error:', res.status, error);
           throw new Error('Failed to load messages');
         }
       } catch (error) {
-        console.error('[fetchMessages] Ошибка:', error);
+        console.error('[fetchMessages] Network error:', error);
         if (isFirst) {
           showMessage('Ошибка загрузки чата');
         }
       }
     }
 
-    // Первый раз загружаем с прокруткой вниз
     await fetchMessages(true);
-
-    // Запускаем автообновление каждые 2 секунды
-    chatUpdateInterval = setInterval(() => fetchMessages(false), 2000);
+    chatUpdateInterval = setInterval(() => fetchMessages(false), 1000);
 
   } catch (error) {
-    console.error('[loadChat] Ошибка:', error);
+    console.error('[loadChat] Error:', error);
     showMessage('Ошибка загрузки чата');
   }
 }
 
 function appendMessage(msg) {
-  console.log('[appendMessage] Добавление сообщения:', msg);
+  console.log('[appendMessage] Adding message:', msg);
   const isOutgoing = Number(msg.sender_id) === Number(currentUserId);
   const messageDiv = document.createElement('div');
   messageDiv.className = `message ${isOutgoing ? 'message-out' : 'message-in'}`;
-  
+
   const contentDiv = document.createElement('div');
   contentDiv.textContent = msg.content;
-  
+
   const timeDiv = document.createElement('div');
   timeDiv.className = 'message-time';
   timeDiv.textContent = formatTime(msg.timestamp);
-  
+
   messageDiv.appendChild(contentDiv);
   messageDiv.appendChild(timeDiv);
-  document.getElementById('chatMessages').appendChild(messageDiv);
+  const chatMessages = document.getElementById('chatMessages');
+  chatMessages.appendChild(messageDiv);
 }
 
 function formatTime(timestamp) {
@@ -378,15 +377,15 @@ function formatTime(timestamp) {
 async function sendMessage() {
   const input = document.getElementById('msgInput');
   const content = input.value.trim();
-  
+
   if (!content || !selectedUserId) {
-    console.log('[sendMessage] Пустое сообщение или не выбран получатель');
+    console.log('[sendMessage] Empty message or no receiver selected');
     return;
   }
-  
+
   try {
     showLoading('#chatMessages');
-    console.log('[sendMessage] Отправка сообщения:', { receiver_id: selectedUserId, content });
+    console.log('[sendMessage] Sending message:', { receiver_id: selectedUserId, content });
     const res = await fetch(`${API}/messages`, {
       method: 'POST',
       headers: {
@@ -397,21 +396,21 @@ async function sendMessage() {
     });
 
     if (res.ok) {
-      console.log('[sendMessage] Сообщение отправлено успешно');
+      console.log('[sendMessage] Message sent successfully');
       input.value = '';
       input.style.height = 'auto';
-      await loadChat(selectedUserId, selectedUsername, true); // Прокрутка вниз после отправки
+      await loadChat(selectedUserId, selectedUsername, true);
     } else if (res.status === 401) {
       console.error('[sendMessage] 401 Unauthorized');
       showMessage('Сессия истекла, войдите снова');
       logout();
     } else {
       const error = await res.json();
-      console.error('[sendMessage] Ошибка ответа:', res.status, error);
+      console.error('[sendMessage] Error:', res.status, error);
       throw new Error('Failed to send message');
     }
   } catch (error) {
-    console.error('[sendMessage] Ошибка:', error);
+    console.error('[sendMessage] Network error:', error);
     showMessage('Ошибка отправки сообщения');
   } finally {
     hideLoading('#chatMessages');
