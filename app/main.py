@@ -20,8 +20,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Путь к директории с фронтендом
-frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend"))
+frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+
 
 # Подключение статических файлов, если директория существует
 if os.path.isdir(frontend_dir):
