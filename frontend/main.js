@@ -58,7 +58,7 @@ function switchTab(tab) {
     t.setAttribute('aria-selected', 'false');
   });
   document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
-
+  
   if (tab === 'login') {
     document.querySelector('.auth-tab:nth-child(1)').classList.add('active');
     document.querySelector('.auth-tab:nth-child(1)').setAttribute('aria-selected', 'true');
@@ -299,33 +299,41 @@ async function loadChat(userId, username, scrollToBottom = false) {
     // Функция для загрузки сообщений
     async function fetchMessages(isFirst = false) {
       try {
+        console.log(`[fetchMessages] Запрос сообщений для userId=${userId}`);
         const res = await fetch(`${API}/messages/${userId}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok) {
           const messages = await res.json();
-          // Проверяем, изменилось ли количество сообщений или последнее сообщение
-          const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
-          const prevLastMessageId = lastMessages.length > 0 ? lastMessages[lastMessages.length - 1].id : null;
-          if (isFirst || lastMessageId !== prevLastMessageId) {
+          console.log('[fetchMessages] Получено сообщений:', messages.length, messages);
+          const chatMessages = document.getElementById('chatMessages');
+          const isAtBottom = chatMessages.scrollTop + chatMessages.clientHeight >= chatMessages.scrollHeight - 10;
+
+          // Обновляем только если сообщения изменились или это первая загрузка
+          if (isFirst || messages.length !== lastMessages.length || JSON.stringify(messages) !== JSON.stringify(lastMessages)) {
             lastMessages = messages;
-            const chatMessages = document.getElementById('chatMessages');
-            const isAtBottom = chatMessages.scrollTop + chatMessages.clientHeight >= chatMessages.scrollHeight - 10;
             chatMessages.innerHTML = '';
             messages.forEach(msg => appendMessage(msg));
-            // Прокручиваем вниз только если пользователь был внизу или это первая загрузка
+            console.log('[fetchMessages] Отрисовано сообщений:', messages.length);
+            // Прокручиваем вниз, если пользователь внизу или это первая загрузка
             if (isFirst || isAtBottom || scrollToBottom) {
               chatMessages.scrollTop = chatMessages.scrollHeight;
+              console.log('[fetchMessages] Прокрутка вниз выполнена');
             }
+          } else {
+            console.log('[fetchMessages] Сообщения не изменились, пропуск рендеринга');
           }
         } else if (res.status === 401) {
+          console.error('[fetchMessages] 401 Unauthorized');
           showMessage('Сессия истекла, войдите снова');
           logout();
           return;
         } else {
+          console.error('[fetchMessages] Ошибка ответа:', res.status);
           throw new Error('Failed to load messages');
         }
       } catch (error) {
+        console.error('[fetchMessages] Ошибка:', error);
         if (isFirst) {
           showMessage('Ошибка загрузки чата');
         }
@@ -335,8 +343,8 @@ async function loadChat(userId, username, scrollToBottom = false) {
     // Первый раз загружаем с прокруткой вниз
     await fetchMessages(true);
 
-    // Запускаем автообновление каждые 3 секунды (меньше нагрузка)
-    chatUpdateInterval = setInterval(() => fetchMessages(false), 3000);
+    // Запускаем автообновление каждые 2 секунды
+    chatUpdateInterval = setInterval(() => fetchMessages(false), 2000);
 
   } catch (error) {
     console.error('[loadChat] Ошибка:', error);
@@ -345,7 +353,8 @@ async function loadChat(userId, username, scrollToBottom = false) {
 }
 
 function appendMessage(msg) {
-  const isOutgoing = msg.sender_id == currentUserId; // Упрощённое сравнение (API должен возвращать согласованные типы)
+  console.log('[appendMessage] Добавление сообщения:', msg);
+  const isOutgoing = Number(msg.sender_id) === Number(currentUserId);
   const messageDiv = document.createElement('div');
   messageDiv.className = `message ${isOutgoing ? 'message-out' : 'message-in'}`;
   
@@ -370,10 +379,14 @@ async function sendMessage() {
   const input = document.getElementById('msgInput');
   const content = input.value.trim();
   
-  if (!content || !selectedUserId) return;
+  if (!content || !selectedUserId) {
+    console.log('[sendMessage] Пустое сообщение или не выбран получатель');
+    return;
+  }
   
   try {
     showLoading('#chatMessages');
+    console.log('[sendMessage] Отправка сообщения:', { receiver_id: selectedUserId, content });
     const res = await fetch(`${API}/messages`, {
       method: 'POST',
       headers: {
@@ -384,17 +397,21 @@ async function sendMessage() {
     });
 
     if (res.ok) {
+      console.log('[sendMessage] Сообщение отправлено успешно');
       input.value = '';
       input.style.height = 'auto';
       await loadChat(selectedUserId, selectedUsername, true); // Прокрутка вниз после отправки
     } else if (res.status === 401) {
+      console.error('[sendMessage] 401 Unauthorized');
       showMessage('Сессия истекла, войдите снова');
       logout();
     } else {
+      const error = await res.json();
+      console.error('[sendMessage] Ошибка ответа:', res.status, error);
       throw new Error('Failed to send message');
     }
   } catch (error) {
-    console.error('Error sending message:', error);
+    console.error('[sendMessage] Ошибка:', error);
     showMessage('Ошибка отправки сообщения');
   } finally {
     hideLoading('#chatMessages');
@@ -402,6 +419,7 @@ async function sendMessage() {
 }
 
 function showMessage(message, type = 'error') {
+  console.log(`[showMessage] ${type}: ${message}`);
   const div = document.createElement('div');
   div.className = `message message-${type}`;
   div.style.position = 'fixed';
