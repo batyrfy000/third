@@ -4,9 +4,8 @@ let currentUserId = null;
 let currentUsername = '';
 let selectedUserId = null;
 let selectedUsername = '';
-let allUsers = []; // Для локального поиска
+let allUsers = [];
 let chatUpdateInterval = null;
-let lastMessages = [];
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -88,7 +87,6 @@ function logout() {
     clearInterval(chatUpdateInterval);
     chatUpdateInterval = null;
   }
-  lastMessages = [];
 }
 
 function debounce(func, wait) {
@@ -263,7 +261,7 @@ function renderUsers(users) {
   console.log('[renderUsers] userList.innerHTML:', userList.innerHTML);
 }
 
-async function loadChat(userId, username, scrollToBottom = false) {
+async function loadChat(userId, username) {
   selectedUserId = userId;
   selectedUsername = username;
 
@@ -291,7 +289,7 @@ async function loadChat(userId, username, scrollToBottom = false) {
       document.getElementById('sidebar').classList.remove('active');
     }
 
-    // Функция для загрузки сообщений (используется и для автообновления)
+    // Функция для загрузки сообщений
     async function fetchMessages(isFirst = false) {
       try {
         const res = await fetch(`${API}/messages/${userId}`, {
@@ -299,15 +297,14 @@ async function loadChat(userId, username, scrollToBottom = false) {
         });
         if (res.ok) {
           const messages = await res.json();
-          // Сравниваем с предыдущими сообщениями
-          if (isFirst || JSON.stringify(messages) !== JSON.stringify(lastMessages)) {
-            lastMessages = messages;
+          // Сортируем сообщения по времени
+          messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          // Добавляем только новые сообщения
+          messages.forEach(msg => appendMessage(msg));
+          // Прокрутка вниз при первой загрузке
+          if (isFirst) {
             const chatMessages = document.getElementById('chatMessages');
-            chatMessages.innerHTML = '';
-            messages.forEach(msg => appendMessage(msg));
-            if (scrollToBottom || isFirst) {
-              chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
+            chatMessages.scrollTop = chatMessages.scrollHeight;
           }
         } else {
           throw new Error('Failed to load messages');
@@ -319,11 +316,12 @@ async function loadChat(userId, username, scrollToBottom = false) {
       }
     }
 
-    // Первый раз загружаем с прокруткой вниз
+    // Очищаем сообщения только при первой загрузке чата
+    document.getElementById('chatMessages').innerHTML = '';
     await fetchMessages(true);
 
-    // Запускаем автообновление каждую секунду (без мерцания)
-    chatUpdateInterval = setInterval(() => fetchMessages(false), 1000);
+    // Запускаем автообновление каждые 2 секунды
+    chatUpdateInterval = setInterval(() => fetchMessages(false), 2000);
 
   } catch (error) {
     showMessage('Ошибка загрузки чата');
@@ -331,20 +329,34 @@ async function loadChat(userId, username, scrollToBottom = false) {
 }
 
 function appendMessage(msg) {
+  const chatMessages = document.getElementById('chatMessages');
+  // Проверяем, не добавлено ли сообщение уже (по id или timestamp, если id нет)
+  const messageKey = msg.id || `${msg.sender_id}-${msg.timestamp}`;
+  if (document.querySelector(`[data-message-id="${messageKey}"]`)) {
+    return; // Сообщение уже существует, пропускаем
+  }
+
   const isOutgoing = Number(msg.sender_id) === Number(currentUserId);
   const messageDiv = document.createElement('div');
   messageDiv.className = `message ${isOutgoing ? 'message-out' : 'message-in'}`;
-  
+  messageDiv.setAttribute('data-message-id', messageKey); // Добавляем уникальный идентификатор
+
   const contentDiv = document.createElement('div');
   contentDiv.textContent = msg.content;
-  
+
   const timeDiv = document.createElement('div');
   timeDiv.className = 'message-time';
   timeDiv.textContent = formatTime(msg.timestamp);
-  
+
   messageDiv.appendChild(contentDiv);
   messageDiv.appendChild(timeDiv);
-  document.getElementById('chatMessages').appendChild(messageDiv);
+  chatMessages.appendChild(messageDiv);
+
+  // Прокрутка вниз, если пользователь находится внизу
+  const isAtBottom = chatMessages.scrollHeight - chatMessages.clientHeight <= chatMessages.scrollTop + 10;
+  if (isAtBottom) {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
 }
 
 function formatTime(timestamp) {
@@ -372,6 +384,7 @@ async function sendMessage() {
     if (res.ok) {
       input.value = '';
       input.style.height = 'auto';
+      // Обновляем чат без очистки
       await loadChat(selectedUserId, selectedUsername);
     } else {
       throw new Error('Failed to send message');
@@ -414,4 +427,4 @@ function hideLoading(selector = 'body') {
   if (!container) return;
   const loading = container.querySelector('.loading');
   if (loading) loading.remove();
-} 
+}
